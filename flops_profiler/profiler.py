@@ -882,14 +882,20 @@ def _instance_norm_flops_compute(
     return input.numel() * (5 if has_affine else 4), 0
 
 
-def _upsample_flops_compute(input, **kwargs):
+#def _upsample_flops_compute(input, **kwargs):
+def _upsample_flops_compute(*args, **kwargs):
+    input = args[0]
     size = kwargs.get('size', None)
+    if size is None and len(args) > 1:
+        size = args[1]
     if size is not None:
         if isinstance(size, tuple) or isinstance(size, list):
             return int(_prod(size)), 0
         else:
             return int(size), 0
     scale_factor = kwargs.get('scale_factor', None)
+    if scale_factor is None and len(args) > 2:
+        scale_factor = args[2]
     assert scale_factor is not None, 'either size or scale_factor should be defined'
     flops = input.numel()
     if isinstance(scale_factor, tuple) and len(scale_factor) == len(input):
@@ -1404,9 +1410,12 @@ def _get_module_macs(module: nn.Module):
 
 def _get_module_duration(module: nn.Module):
     duration = module.__duration__
-    if duration == 0:  # e.g. ModuleList
+    #if duration == 0:  # e.g. ModuleList
+    if module.__duration__ == 0:
         for m in module.children():
             duration += m.__duration__
+            if m.__duration__ == 0:
+                duration += _get_module_duration(m)
     return duration
 
 def _get_module_profile_table(module: nn.Module):
@@ -1513,6 +1522,7 @@ def get_model_profile(
     flops = prof.get_total_flops()
     macs = prof.get_total_macs()
     params = prof.get_total_params()
+    fwd_latency = prof.get_total_duration()
     if print_profile:
         prof.print_model_profile(
             profile_step=warm_up,
@@ -1521,9 +1531,10 @@ def get_model_profile(
             detailed=detailed,
             output_file=output_file,
         )
-
     prof.end_profile()
     if as_string:
-        return _number_to_string(flops), _macs_to_string(macs), _params_to_string(params)
+        return _number_to_string(flops), _number_to_string(fwd_latency), _flops_to_string(flops/fwd_latency)
+        #return _number_to_string(flops), _macs_to_string(macs), _params_to_string(params)
 
-    return flops, macs, params
+    #return flops, macs, params
+    return flops, fwd_latency, flops/fwd_latency
